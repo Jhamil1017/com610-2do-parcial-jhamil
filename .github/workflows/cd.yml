@@ -1,0 +1,99 @@
+name: CD - Build, Push y Despliegue en EC2
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: 1. Ejecutar Pruebas Automatizadas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  build-and-push:
+    name: 2. Construir y Publicar Imagen Docker
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Iniciar sesion en GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Construir y subir imagen identificada con SHA del commit
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/api-libros-com610:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/api-libros-com610:latest
+
+  deploy:
+    name: 3. Desplegar en EC2 con Verificacion y Rollback
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar contenedor en EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            IMAGE_NEW="ghcr.io/${{ github.repository_owner }}/api-libros-com610:${{ github.sha }}"
+            CONTAINER_NAME="api-libros-container"
+            ENV_FILE="/home/ubuntu/com610-2do-parcial-jhamil/.env"
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker pull "$IMAGE_NEW"
+
+            if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+              CURRENT_IMAGE=$(docker inspect --format='{{.Config.Image}}' "$CONTAINER_NAME")
+              docker tag "$CURRENT_IMAGE" api-libros-rollback:previous || true
+              docker stop "$CONTAINER_NAME" || true
+              docker rm "$CONTAINER_NAME" || true
+            fi
+
+            docker run -d \
+              --name "$CONTAINER_NAME" \
+              --restart unless-stopped \
+              -p 127.0.0.1:3000:3000 \
+              --env-file "$ENV_FILE" \
+              -e APP_VERSION="2.0.0-${{ github.sha }}" \
+              "$IMAGE_NEW"
+
+            sleep 4
+
+            if curl -sf http://127.0.0.1/health >/dev/null && curl -sf http://127.0.0.1/libros >/dev/null; then
+              echo "Verificacion exitosa: /health y /libros responden correctamente."
+            else
+              echo "ERROR: La nueva version fallo la verificacion. Ejecutando rollback..."
+              docker stop "$CONTAINER_NAME" || true
+              docker rm "$CONTAINER_NAME" || true
+              if docker image inspect api-libros-rollback:previous >/dev/null 2>&1; then
+                docker run -d \
+                  --name "$CONTAINER_NAME" \
+                  --restart unless-stopped \
+                  -p 127.0.0.1:3000:3000 \
+                  --env-file "$ENV_FILE" \
+                  api-libros-rollback:previous
+                echo "Rollback completado a la version anterior."
+              fi
+              exit 1
+            fi

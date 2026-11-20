@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "api-libros-com610",
   "version": "1.0.0",
   "description": "API REST de catalogo de libros en EC2 y RDS con CI/CD",

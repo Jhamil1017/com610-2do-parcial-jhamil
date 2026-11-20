@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const defaultDb = require('./db');
 
 function createApp(db = defaultDb) {
