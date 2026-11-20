@@ -40,8 +40,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/api-libros-com610:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/api-libros-com610:latest
+            ghcr.io/jhamil1017/api-libros-com610:${{ github.sha }}
+            ghcr.io/jhamil1017/api-libros-com610:latest
 
   deploy:
     name: 3. Desplegar en EC2 con Verificacion y Rollback
@@ -56,7 +56,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            IMAGE_NEW="ghcr.io/${{ github.repository_owner }}/api-libros-com610:${{ github.sha }}"
+            IMAGE_NEW="ghcr.io/jhamil1017/api-libros-com610:${{ github.sha }}"
             CONTAINER_NAME="api-libros-container"
             ENV_FILE="/home/ubuntu/com610-2do-parcial-jhamil/.env"
 
